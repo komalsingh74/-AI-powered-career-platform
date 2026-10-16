@@ -1,0 +1,391 @@
+openapi: 3.1.0
+info:
+  title: ThrivePath API
+  version: 1.0.0
+  description: Authenticated career profile, resume, career coach, and consultation API.
+servers:
+  - url: http://localhost:4000/api
+security:
+  - AccessCookie: []
+paths:
+  /health:
+    get:
+      security: []
+      summary: Check API health
+      responses:
+        "200":
+          description: API is healthy
+  /auth/register:
+    post:
+      security: []
+      summary: Register a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 80 }
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8, maxLength: 72 }
+      responses:
+        "201": { description: User created; sign in to establish an access cookie }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: Email already registered }
+  /auth/login:
+    post:
+      security: []
+      summary: Log in and set the httpOnly accessToken cookie
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 1, maxLength: 72 }
+      responses:
+        "200": { description: Authenticated user returned and cookie set }
+        "401": { description: Invalid credentials }
+  /auth/logout:
+    post:
+      summary: Clear the access cookie
+      responses:
+        "200": { description: Logged out }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /users/me:
+    get:
+      summary: Get the current user profile
+      responses:
+        "200": { description: Current user's public profile }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      summary: Update profile fields
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 2, maxLength: 80 }
+                phone: { type: string, maxLength: 20 }
+                profile:
+                  type: object
+                  properties:
+                    headline: { type: string, maxLength: 160 }
+                    location: { type: string, maxLength: 120 }
+                    skills: { type: array, maxItems: 50, items: { type: string, maxLength: 60 } }
+                    experienceYears: { type: number, minimum: 0, maximum: 60 }
+      responses:
+        "200": { description: Updated profile }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /dashboard:
+    get:
+      summary: Get current user's aggregated dashboard counts and next consultation
+      responses:
+        "200": { description: Dashboard summary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /resumes:
+    get:
+      summary: List resumes with server-side search, pagination, and sorting
+      parameters:
+        - { in: query, name: page, schema: { type: integer, minimum: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 50 } }
+        - { in: query, name: search, schema: { type: string, maxLength: 100 } }
+        - { in: query, name: sort, schema: { type: string, enum: [title, -title, createdAt, -createdAt, updatedAt, -updatedAt] } }
+      responses:
+        "200": { description: Page of owned resumes and pagination metadata }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      summary: Create a structured resume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 100 }
+                template: { type: string, enum: [MODERN, ATS_CLASSIC] }
+                content: { $ref: "#/components/schemas/ResumeContent" }
+      responses:
+        "201": { description: Resume created }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /resumes/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/ObjectId" }
+    get:
+      summary: Get an owned resume
+      responses:
+        "200": { description: Resume returned }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      summary: Update resume title, template, or structured content
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, minLength: 1, maxLength: 100 }
+                template: { type: string, enum: [MODERN, ATS_CLASSIC] }
+                content: { $ref: "#/components/schemas/ResumeContent" }
+      responses:
+        "200": { description: Updated resume }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      summary: Delete an owned resume
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /resumes/{id}/generate:
+    parameters:
+      - { $ref: "#/components/parameters/ObjectId" }
+    post:
+      summary: Generate an ATS-friendly summary and experience draft from saved details
+      description: Requires LLM configuration. Limited to 10 requests per 15 minutes per IP. AI output is validated and persisted to the owned resume.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                targetRole: { type: string, maxLength: 120 }
+      responses:
+        "200": { description: Updated structured resume }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { description: AI generation rate limit reached }
+        "502": { description: AI provider returned an invalid response }
+        "503": { description: LLM is not configured }
+  /chat/sessions:
+    get:
+      summary: List the user's conversation sessions
+      responses:
+        "200": { description: Chat sessions ordered by recent activity }
+    post:
+      summary: Create a conversation session
+      responses:
+        "201": { description: New session }
+  /chat/sessions/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/ObjectId" }
+    patch:
+      summary: Rename an owned chat session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        "200": { description: Renamed session }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      summary: Delete an owned session and its messages
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /chat/sessions/{id}/messages:
+    parameters:
+      - { $ref: "#/components/parameters/ObjectId" }
+    get:
+      summary: Read a session's persisted messages
+      responses:
+        "200": { description: Session and chronological message history }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      summary: Persist a user message and request an AI response
+      description: Requires GEMINI_API_KEY and a supported LLM_MODEL. Limited to 20 messages per minute per IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string, minLength: 1, maxLength: 4000 }
+      responses:
+        "201": { description: User and assistant messages persisted }
+        "429": { description: Rate limit or upstream LLM rate limit }
+        "502": { description: LLM unavailable or malformed response }
+        "503": { description: LLM not configured }
+        "504": { description: LLM request timed out }
+  /consultations/consultants:
+    get:
+      summary: List active consultants and weekly availability
+      parameters:
+        - { in: query, name: search, schema: { type: string, maxLength: 100 } }
+      responses:
+        "200": { description: Active consultant directory }
+  /consultations/consultants/{id}/slots:
+    parameters:
+      - { $ref: "#/components/parameters/ObjectId" }
+    get:
+      summary: List open future slots for a consultant-local date
+      parameters:
+        - { in: query, name: date, required: true, schema: { type: string, format: date } }
+      responses:
+        "200": { description: Consultant-local time slots with availability and UTC start times }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /consultations/bookings:
+    get:
+      summary: List the current user's bookings with server-side pagination and filters
+      parameters:
+        - { in: query, name: page, schema: { type: integer, minimum: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 50 } }
+        - { in: query, name: status, schema: { type: string } }
+        - { in: query, name: search, schema: { type: string, maxLength: 100 } }
+        - { in: query, name: sort, schema: { type: string, enum: [startAt, -startAt, createdAt, -createdAt] } }
+      responses:
+        "200": { description: Owned bookings and pagination metadata }
+    post:
+      summary: Validate a slot, create a pending booking, and return a Razorpay order
+      description: Requires an active consultant, a future available slot, and Razorpay key configuration. Amounts use the currency's smallest unit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [consultantId, startAt, name, email]
+              properties:
+                consultantId: { type: string, pattern: "^[a-fA-F0-9]{24}$" }
+                startAt: { type: string, format: date-time }
+                name: { type: string, minLength: 2, maxLength: 80 }
+                email: { type: string, format: email }
+                phone: { type: string, maxLength: 20 }
+                agenda: { type: string, maxLength: 1000 }
+      responses:
+        "201": { description: Pending booking and Razorpay Checkout order details }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: Slot is unavailable or already booked }
+        "503": { description: Razorpay is not configured }
+  /consultations/bookings/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/ObjectId" }
+    get:
+      summary: Read booking status from the backend (including webhook-confirmed payment state)
+      responses:
+        "200": { description: Owned booking }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /consultations/bookings/{id}/verify-payment:
+    parameters:
+      - { $ref: "#/components/parameters/ObjectId" }
+    post:
+      summary: Verify a Razorpay Checkout payment and confirm the owned booking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orderId, paymentId, signature]
+              properties:
+                orderId: { type: string }
+                paymentId: { type: string }
+                signature: { type: string, pattern: "^[a-fA-F0-9]{64}$" }
+      responses:
+        "200": { description: Verified payment and booking state }
+        "400": { description: Invalid signature or mismatched payment details }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /consultations/bookings/{id}/cancel-checkout:
+    parameters:
+      - { $ref: "#/components/parameters/ObjectId" }
+    post:
+      summary: Expire an owned pending Stripe Checkout session
+      description: The backend asks Stripe to expire the session and only releases the slot after Stripe confirms expiration.
+      responses:
+        "200": { description: Current booking status from the backend }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /payments/webhook:
+    post:
+      security: []
+      summary: Legacy Stripe webhook endpoint
+      description: Requires the Stripe-Signature header and the raw application/json body. Duplicate event IDs are idempotent.
+      parameters:
+        - in: header
+          name: Stripe-Signature
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Event accepted or previously processed }
+        "400": { description: Invalid signature or payload }
+        "503": { description: Event processing should be retried }
+  /payments/razorpay/webhook:
+    post:
+      security: []
+      summary: Verify Razorpay payment.captured webhook events
+      description: Requires X-Razorpay-Signature and the raw application/json request body. Configure RAZORPAY_WEBHOOK_SECRET to the webhook secret set in the Razorpay Dashboard.
+      parameters:
+        - in: header
+          name: X-Razorpay-Signature
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Event received }
+        "400": { description: Invalid signature or payload }
+        "503": { description: Webhook secret is not configured }
+components:
+  securitySchemes:
+    AccessCookie:
+      type: apiKey
+      in: cookie
+      name: accessToken
+  parameters:
+    ObjectId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, pattern: "^[a-fA-F0-9]{24}$" }
+  schemas:
+    ResumeContent:
+      type: object
+      properties:
+        personalInformation:
+          type: object
+          properties:
+            name: { type: string, maxLength: 80 }
+            email: { type: string, maxLength: 254 }
+            phone: { type: string, maxLength: 20 }
+            location: { type: string, maxLength: 120 }
+            headline: { type: string, maxLength: 160 }
+            links: { type: array, maxItems: 10, items: { type: string, maxLength: 300 } }
+        summary: { type: string, maxLength: 5000 }
+        education: { type: array, maxItems: 30, items: { type: object } }
+        experience: { type: array, maxItems: 50, items: { type: object } }
+        skills: { type: array, maxItems: 100, items: { type: string, maxLength: 60 } }
+        projects: { type: array, maxItems: 50, items: { type: object } }
+        certifications: { type: array, maxItems: 50, items: { type: object } }
+        achievements: { type: array, maxItems: 50, items: { type: string, maxLength: 300 } }
+  responses:
+    BadRequest:
+      description: Invalid request body or query parameter
+    Unauthorized:
+      description: Missing or expired authentication cookie
+    NotFound:
+      description: Resource not found or not owned by the current user
