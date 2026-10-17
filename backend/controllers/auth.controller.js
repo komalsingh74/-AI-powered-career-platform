@@ -17,12 +17,15 @@ const loginSchema = z.object({
   password: z.string().min(1).max(72),
 });
 
+
 const cookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
-  sameSite: "lax",
+  sameSite:
+    process.env.NODE_ENV === "production" ? "none" : "lax",
   path: "/",
 };
+
 
 export const register = asyncHandler(async (req, res) => {
   const input = registerSchema.parse(req.body);
